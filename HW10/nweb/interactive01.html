@@ -1,0 +1,227 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" >
+<head>
+<title>interactive01</title>
+<script language="javascript"  type="text/javascript">
+
+//version 02 todo:
+//  -add stop/start and refresh-interval controls to the refresh activity
+//  -(maybe) try to add some sort of mutex to see if the message loss/corruption is due to activity in the browser.
+
+
+var url = "servfunc?param="; // we're going to send a request to 'servfunc' with a '?param=' prefix for some query
+
+function sendMsgIDTx1Tx2() { //clicking 'sendall' button sends contends of tx0 separately and tx1 and tx2 text boxes combined, 
+	var TxMsgID = document.getElementById("msgid").value;
+	var Tx12Data = document.getElementById("tx1string").value + document.getElementById("tx2string").value;
+	req.open("GET", url + escape(TxMsgID) + "," + escape(Tx12Data), true);//The 'escape()' function encodes special characters, with the exception of * @ - _ + . / (see also unescape() ).
+	req.onreadystatechange = getRx012;	//!!(are we??) assigning a function to req.onreadstatechange, rather than returning a value to it
+	req.send(null);
+};
+
+function getRx012() {	//catches the response from the server, copies it into the display document
+	if(req.readyState == 4) { //the request has been replied to
+		results = req.responseText.split(",");	//we'll assume a comma-delimited result for the example
+		document.getElementById('rxmsgid').value= results[0];
+		document.getElementById('rx12string').value= results[1];
+	}
+}
+
+function setButtons() { //sets all button values to 1, then sends button value message
+	document.getElementById('bit7_1').checked = true;
+	document.getElementById('bit6_1').checked = true;
+	document.getElementById('bit5_1').checked = true;
+	document.getElementById('bit4_1').checked = true;
+	document.getElementById('bit3_1').checked = true;
+	document.getElementById('bit2_1').checked = true;
+	document.getElementById('bit1_1').checked = true;
+	document.getElementById('bit0_1').checked = true;
+	sendButtons('S');
+}
+
+function resetButtons() { //sets all button values to 0, then sends button value message
+	document.getElementById('bit7_0').checked = true;
+	document.getElementById('bit6_0').checked = true;
+	document.getElementById('bit5_0').checked = true;
+	document.getElementById('bit4_0').checked = true;
+	document.getElementById('bit3_0').checked = true;
+	document.getElementById('bit2_0').checked = true;
+	document.getElementById('bit1_0').checked = true;
+	document.getElementById('bit0_0').checked = true;
+	sendButtons('R');
+}
+
+function sendButtons(cmdtype) { //clicking any value sends hex representation of button's binary value
+	var buttonval = 0;
+	if(document.getElementById('bit7_1').checked) buttonval= buttonval + 128;
+	if(document.getElementById('bit6_1').checked) buttonval= buttonval + 64;
+	if(document.getElementById('bit5_1').checked) buttonval= buttonval + 32;
+	if(document.getElementById('bit4_1').checked) buttonval= buttonval + 16;
+	if(document.getElementById('bit3_1').checked) buttonval= buttonval + 8;
+	if(document.getElementById('bit2_1').checked) buttonval= buttonval + 4;
+	if(document.getElementById('bit1_1').checked) buttonval= buttonval + 2;
+	if(document.getElementById('bit0_1').checked) buttonval= buttonval + 1;
+	var hexbuttonval = (buttonval).toString(0x10);
+	req.open("GET", url + cmdtype + "," + hexbuttonval, true);//simulating a protocol that identifies button values as 'V,nn' where nn is the hex button value
+	req.onreadystatechange = getRxbuttons;	
+	req.send(null);
+}
+
+	
+function getRxbuttons() {	//catches the response from the server, writes it into the display document
+	if(req.readyState == 4) { //the request has been replied to
+		results = req.responseText.split(",");	//we'll assume a comma-delimited result for the example
+		document.getElementById('rxbuttoncmd').value= results[0];
+		document.getElementById('rxbuttonval').value= results[1];
+	}
+}
+
+//!!
+//experiments 'setInterval_periodicQuery()'  and 'setTimeout_periodicQuery()' use alternate javascript methods 'setTimeout()' 
+// and 'setInterval()' to generate periodic refresh activity.  
+//What we see for either method is -- 
+// - every few queries, there's a skip.  From inspecting the 'GET' requests in Firebug it appears as if the skip is on the 
+//	 transmit side. 
+// - when the refresh interval is short (500 msec) the other webpage operations (send/receive buttons and boxes) mostly
+//   stop working.  When the refresh interval is lengthened (2000 msec) they mostly work. 
+// - the amount of memory used by Firefox as viewed in task manager creeps up and up with no upper limit as yet observed.
+// - something is thrashing the PC CPU pretty hard, as witness the fan (runs constantly) and heat (gets hot). 
+// - turning Firebug on/off doesn't visibly affect any of the above
+// - question: could the thrashing be due to the webserver? Its doing a lot of quick updates of the debuglog.txt logfile. 
+//!!todo (future):
+// - add controls on the webpage to start/stop either method and adjust the refresh interval. 
+// - try to figure out if the 'stop working' mentioned above is due to various requests interfering with each other in the
+//   browser or in the server.
+//
+function setInterval_periodicQuery() { //apply the setInterval() method to this function in 'onload' to send a message to the server every 500 msecs
+	var txcmd=document.getElementById('txquerycmd').value;
+	var txqnum=document.getElementById('txquerynumber').value;
+	document.getElementById('txquerynumber').value= parseInt(txqnum)+1;
+	req.open("GET", url + txcmd + "," + txqnum, true);
+	req.onreadystatechange = getQueryResult;	
+	req.send(null);
+}
+
+function setTimeout_periodicQuery() { //alternative to above: call this function for the first time in 'onload()' to send a message to the server every 500 msecs
+	var txcmd=document.getElementById('txquerycmd').value;
+	var txqnum=document.getElementById('txquerynumber').value;
+	document.getElementById('txquerynumber').value= parseInt(txqnum)+1;
+	req.open("GET", url + txcmd + "," + txqnum, true);
+	req.onreadystatechange = getQueryResult;	
+	setTimeout(periodicQuery,500);	//!! the trick -- it calls itself every 500 msec
+	req.send(null); //this gives problems when it comes before setTimeout(). 
+}
+
+function getQueryResult() { //catches the query response from the server, writes it into the display document
+	if(req.readyState == 4) { //the request has been replied to
+		results = req.responseText.split(",");	//we'll assume a comma-delimited result for the example
+		document.getElementById('rxquerycmd').value= results[0];
+		document.getElementById('rxquerynumber').value= results[1];
+	}
+}
+
+function startsystem() { //initialize the display, start or schedule the refresh task
+	//various stuff should go here
+	document.getElementById('txquerynumber').value= 0; //initialize the query counter
+	//choose one of the following to test the two methods of getting a period refresh activity
+//	setTimeout_periodicQuery();	//do the first query to kick things off
+//	document.getElementById('txquerycmd').value='Q';
+	setInterval(setInterval_periodicQuery,2000);	//start the refresh activity
+	document.getElementById('txquerycmd').value='sI';
+}	
+
+var req = new XMLHttpRequest(); //Does this need to be last in the script?
+
+</script>
+</head>
+
+
+<! todo: useful components of display page: server-status; ... >
+<! todo: useful features for display page: turn logging on/off, ...>
+
+<body onload="startsystem()">
+
+  
+    <form name="rbForm">
+		<table border="1">
+			<tr>
+				<td>Port 0</td>
+				<td>bit7</td>
+				<td>bit6</td>
+				<td>bit5</td>
+				<td>bit4</td> 
+				<td>bit3</td>
+				<td>bit2</td>
+				<td>bit1</td>
+				<td>bit0</td> 
+				<td>
+				 <input type="button" onfocus="this.blur()" value="resend" 
+				onclick="sendButtons('U')" />
+				</td>
+			</tr>
+			<tr>
+				<td>on</td>
+				<td><input type="radio" name="bit7" id="bit7_1" value="1" onClick="sendButtons(7)" /></td>
+				<td><input type="radio" name="bit6" id="bit6_1" value="1" onClick="sendButtons(6)" /></td>
+				<td><input type="radio" name="bit5" id="bit5_1" value="1" onClick="sendButtons(5)" /></td>
+				<td><input type="radio" name="bit4" id="bit4_1" value="1" onClick="sendButtons(4)" /></td>
+				<td><input type="radio" name="bit3" id="bit3_1" value="1" onClick="sendButtons(3)" /></td>
+				<td><input type="radio" name="bit2" id="bit2_1" value="1" onClick="sendButtons(2)" /></td>
+				<td><input type="radio" name="bit1" id="bit1_1" value="1" onClick="sendButtons(1)" /></td>
+				<td><input type="radio" name="bit0" id="bit0_1" value="1" onClick="sendButtons(0)" /></td>
+				<td>
+				 <input type="button" onfocus="this.blur()" value="all on" 
+				onclick="setButtons()" />
+				</td>
+			</tr>
+			<tr>
+				<td>off</td>
+				<td><input type="radio" name="bit7" id="bit7_0" value="0" CHECKED onClick="sendButtons('h')"  /></td>
+				<td><input type="radio" name="bit6" id="bit6_0" value="0" CHECKED onClick="sendButtons('g')"  /></td>
+				<td><input type="radio" name="bit5" id="bit5_0" value="0" CHECKED onClick="sendButtons('f')"  /></td>
+				<td><input type="radio" name="bit4" id="bit4_0" value="0" CHECKED onClick="sendButtons('e')"  /></td>
+				<td><input type="radio" name="bit3" id="bit3_0" value="0" CHECKED onClick="sendButtons('d')"  /></td>
+				<td><input type="radio" name="bit2" id="bit2_0" value="0" CHECKED onClick="sendButtons('c')"  /></td>
+				<td><input type="radio" name="bit1" id="bit1_0" value="0" CHECKED onClick="sendButtons('b')"  /></td>
+				<td><input type="radio" name="bit0" id="bit0_0" value="0" CHECKED onClick="sendButtons('a')"  /></td>
+				<td>
+				 <input type="button" onfocus="this.blur()" value="all off" 
+				onclick="resetButtons()" />
+				</td> 
+			</tr>
+		</table>
+	</form>
+ 
+ 
+	<p>
+		Cmd: <input type="text" size="1" name="rxbuttoncmd" id="rxbuttoncmd" />
+ 
+		Value: <input type="text" size="2" name="rxbuttonval" id="rxbuttonval" />
+	</p>
+	
+	<br><br><br>
+	<p>
+		MsgID: <input type="text" size="10" name="msgid" id="msgid"  />
+
+		Tx1: <input type="text" size="10" name="tx1string" id="tx1string"  />
+
+		Tx2: <input type="text" size="10" name="tx2string" id="tx2string"  />
+	
+		<input type="button" onfocus="this.blur()" value="sendall" onclick="sendMsgIDTx1Tx2()" />
+		Rx MsgID: <input type="text" size="10" name="rxmsgid" id="rxmsgid" />
+
+		Rx1+Rx2 : <input type="text" size="20" name="rx12string" id="rx12string" />
+	</p>
+ 
+ 	<br><br><br>
+	<p>
+		Tx Query Cmd: <input type="text" size="4" name="txquerycmd" id="txquerycmd"  />
+		Tx Query#: <input type="text" size="4" name="txquerynumber" id="txquerynumber"  />
+		Rx Query Cmd: <input type="text" size="4" name="rxquerycmd" id="rxquerycmd"  />
+		Rx Query#: <input type="text" size="4" name="rxquerynumber" id="rxquerynumber"  />
+	</p>	
+
+
+
+</body>
+</html>
