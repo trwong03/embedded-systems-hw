@@ -1,45 +1,6 @@
-/**
- * ism43362_socket.c
- *
- * Implementation of the POSIX socket shim for the ISM43362 on the
- * B-L475E-IOT01A, targeting the STM32CubeIDE Wifi_Client_Server project.
- *
- * Changes from the original version
- * ==================================
- * 1. ES_WIFIObject_t s_wifi REMOVED.
- *    The Wifi_Client_Server project owns a global WiFi object internally;
- *    we do not declare or pass one ourselves.
- *
- * 2. All ES_WIFI_xxx() calls replaced with WIFI_xxx() calls.
- *    wifi.h (in the project's Inc/ folder) is the correct include.
- *
- *      ES_WIFI_IO_Init()               -> handled inside WIFI_Init()
- *      ES_WIFI_Init()                  -> WIFI_Init()
- *      ES_WIFI_Connect()               -> WIFI_Connect()
- *      ES_WIFI_GetNetworkSettings()    -> WIFI_GetIP_Address()
- *      ES_WIFI_StartClientConnection() -> WIFI_OpenClientConnection()
- *      ES_WIFI_SendData()              -> WIFI_SendData()
- *      ES_WIFI_ReceiveData()           -> WIFI_ReceiveData()
- *      ES_WIFI_StopClientConnection()  -> WIFI_CloseClientConnection()
- *
- * 3. Status type changed from ES_WIFI_Status_t / ES_WIFI_STATUS_OK
- *    to WIFI_Status_t / WIFI_STATUS_OK.
- *
- * 4. Security constant changed from ES_WIFI_SEC_WPA2
- *    to WIFI_ECN_WPA2_PSK (defined in wifi.h).
- *
- * 5. is_stdio_fd() branch in ism_write() REMOVED.
- *    The project's syscalls.c retargets _write() to the UART already,
- *    so write(1, buf, n) works through the normal C library path.
- *
- * Everything else (slot bitmask, fragmentation loop, receive polling)
- * is unchanged.
- */
-
 #include "ism43362_socket.h"
 #include "ism43362_config.h"
 
-/* Project-level Wi-Fi abstraction (Wifi_Client_Server/Inc/wifi.h) */
 #include "wifi.h"
 #include "stm32l4xx_hal.h"
 
@@ -47,20 +8,12 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* -------------------------------------------------------------------------
- * Private state
- * ---------------------------------------------------------------------- */
-
 static uint8_t  s_slot_used   = 0x00;   /* bitmask: bits 0-3 = sockets 0-3 */
 static char     s_last_error[128] = "none";
 static int      s_initialized = 0;
 
 /* The ISM43362 firmware accepts/returns at most 1460 bytes per transaction */
 #define ISM_MAX_XFER_SIZE  1460
-
-/* -------------------------------------------------------------------------
- * Internal helpers
- * ---------------------------------------------------------------------- */
 
 static void set_error(const char *msg)
 {
@@ -86,9 +39,6 @@ static void free_slot(int slot)
         s_slot_used &= ~(1u << slot);
 }
 
-/* -------------------------------------------------------------------------
- * inet_addr() – parse "a.b.c.d" into a network-order uint32_t
- * ---------------------------------------------------------------------- */
 uint32_t inet_addr(const char *cp)
 {
     uint32_t result = 0;
@@ -125,31 +75,27 @@ int ism_wifi_init(void)
 {
     if (s_initialized) return 0;
 
+    printf("Calling WIFI_Init...\r\n");
     if (WIFI_Init() != WIFI_STATUS_OK) {
-        set_error("WIFI_Init failed – check SPI3 and DRDY wiring");
+        set_error("WIFI_Init failed");
         return -1;
     }
+    printf("WIFI_Init OK\r\n");
 
-    if (WIFI_Connect(ISM_WIFI_SSID,
-                     ISM_WIFI_PASSWORD,
-                     WIFI_ECN_WPA2_PSK) != WIFI_STATUS_OK) {
-        set_error("WIFI_Connect failed – check SSID and password");
+    if (WIFI_Connect(ISM_WIFI_SSID, ISM_WIFI_PASSWORD, WIFI_ECN_WPA2_PSK) != WIFI_STATUS_OK) {
+        set_error("WIFI_Connect failed");
         return -1;
     }
+    printf("Connected\r\n");
 
-    /* Optional: read and print the assigned IP address */
     uint8_t ip[4];
-    if (WIFI_GetIP_Address(ip) == WIFI_STATUS_OK) {
-        printf("ISM43362 IP: %d.%d.%d.%d\r\n", ip[0], ip[1], ip[2], ip[3]);
-    }
+    if (WIFI_GetIP_Address(ip, 4) == WIFI_STATUS_OK)
+        printf("IP: %d.%d.%d.%d\r\n", ip[0], ip[1], ip[2], ip[3]);
 
     s_initialized = 1;
     return 0;
 }
 
-/* -------------------------------------------------------------------------
- * ism_socket()
- * ---------------------------------------------------------------------- */
 int ism_socket(int domain, int type, int protocol)
 {
     (void)protocol;
@@ -192,31 +138,30 @@ int ism_connect(int sockfd, const struct sockaddr *addr, uint32_t addrlen)
 
     const struct sockaddr_in *sin = (const struct sockaddr_in *)addr;
 
-    /* Convert network-order IP back to dotted-decimal string.
-     * WIFI_OpenClientConnection() wants a string, not a uint32.          */
     uint32_t ip_h = ntohl(sin->sin_addr.s_addr);
     uint16_t port = ntohs(sin->sin_port);
 
-    char ip_str[16];
-    snprintf(ip_str, sizeof(ip_str), "%u.%u.%u.%u",
-             (unsigned)((ip_h >> 24) & 0xFF),
-             (unsigned)((ip_h >> 16) & 0xFF),
-             (unsigned)((ip_h >>  8) & 0xFF),
-             (unsigned)( ip_h        & 0xFF));
+    uint8_t ip_bytes[4];
+    ip_bytes[0] = (ip_h >> 24) & 0xFF;
+    ip_bytes[1] = (ip_h >> 16) & 0xFF;
+    ip_bytes[2] = (ip_h >>  8) & 0xFF;
+    ip_bytes[3] =  ip_h        & 0xFF;
 
     WIFI_Status_t rc = WIFI_OpenClientConnection(
             (uint32_t)sockfd,
             WIFI_TCP_PROTOCOL,
             "",
-            ip_str,
+            ip_bytes,
             port,
             0);
 
     if (rc != WIFI_STATUS_OK) {
         char buf[80];
         snprintf(buf, sizeof(buf),
-                 "WIFI_OpenClientConnection failed (rc=%d) -> %s:%u",
-                 (int)rc, ip_str, (unsigned)port);
+                 "WIFI_OpenClientConnection failed (rc=%d) -> %u.%u.%u.%u:%u",
+                 (int)rc,
+                 ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3],
+                 (unsigned)port);
         set_error(buf);
         free_slot(sockfd);
         return -1;
@@ -224,13 +169,6 @@ int ism_connect(int sockfd, const struct sockaddr *addr, uint32_t addrlen)
     return 0;
 }
 
-/* -------------------------------------------------------------------------
- * ism_write()
- *
- * Note: the is_stdio_fd() branch from the original has been removed.
- * write(1, buf, n) now reaches the C library's _write() stub which
- * syscalls.c in the Wifi_Client_Server project retargets to huart1.
- * ---------------------------------------------------------------------- */
 int ism_write(int fd, const void *buf, size_t count)
 {
     if (!s_initialized) { set_error("not initialized"); return -1; }
@@ -270,13 +208,6 @@ int ism_write(int fd, const void *buf, size_t count)
     return (int)total_sent;
 }
 
-/* -------------------------------------------------------------------------
- * ism_read()
- *
- * Polls WIFI_ReceiveData() until data arrives or the timeout expires.
- * A return of 0 means the server closed the connection (EOF), matching
- * standard POSIX read() semantics and the while-loop condition in client.c.
- * ---------------------------------------------------------------------- */
 int ism_read(int fd, void *buf, size_t count)
 {
     if (!s_initialized) { set_error("not initialized"); return -1; }
@@ -312,9 +243,6 @@ int ism_read(int fd, void *buf, size_t count)
     }
 }
 
-/* -------------------------------------------------------------------------
- * ism_close()
- * ---------------------------------------------------------------------- */
 int ism_close(int fd)
 {
     if (fd < 0 || fd > 3) { set_error("bad fd"); return -1; }
@@ -330,9 +258,6 @@ int ism_close(int fd)
     return 0;
 }
 
-/* -------------------------------------------------------------------------
- * ism_last_error()
- * ---------------------------------------------------------------------- */
 const char *ism_last_error(void)
 {
     return s_last_error;

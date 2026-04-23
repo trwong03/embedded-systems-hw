@@ -29,6 +29,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/times.h>
+extern UART_HandleTypeDef hDiscoUart;
 
 
 /* Variables */
@@ -41,6 +42,12 @@ char **environ = __env;
 
 
 /* Functions */
+int _write(int file, char *ptr, int len)
+{
+    HAL_UART_Transmit(&hDiscoUart, (uint8_t*)ptr, len, HAL_MAX_DELAY);
+    return len;
+}
+
 void initialise_monitor_handles()
 {
 }

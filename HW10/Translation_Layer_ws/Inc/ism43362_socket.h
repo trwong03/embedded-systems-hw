@@ -1,21 +1,3 @@
-/**
- * ism43362_socket.h
- *
- * POSIX-style socket shim for the Inventek ISM43362-M3G-L44 Wi-Fi module
- * on the B-L475E-IOT01A, targeting the STM32CubeIDE
- * Wifi_Client_Server example project.
- *
- * Changes from the original version:
- *   - es_wifi.h / es_wifi_io.h includes removed; wifi.h is included instead.
- *   - ism_wifi_init() prototype comment updated to reflect that it now
- *     calls WIFI_Init() / WIFI_Connect() rather than the raw ES_WIFI layer.
- *   - The ISM_DEBUG_UART note is removed; printf retargeting is handled
- *     by the project's syscalls.c, not by this shim.
- *
- * Usage: in client_ism43362.c replace the Linux socket headers with:
- *   #include "ism43362_socket.h"
- */
-
 #ifndef ISM43362_SOCKET_H
 #define ISM43362_SOCKET_H
 
@@ -26,16 +8,6 @@ extern "C" {
 #include <stdint.h>
 #include <stddef.h>
 
-/* -------------------------------------------------------------------------
- * Minimal POSIX compatibility layer
- *
- * Provides just enough types and constants so that client.c compiles
- * without any changes to its socket-related code.
- *
- * If you later add lwIP to the project, define ISM_NO_POSIX_COMPAT before
- * including this header to suppress these declarations and call the
- * ism_xxx() functions directly.
- * ---------------------------------------------------------------------- */
 #ifndef ISM_NO_POSIX_COMPAT
 
 #define AF_INET     2
@@ -80,9 +52,6 @@ uint32_t inet_addr(const char *cp);
 
 #endif /* ISM_NO_POSIX_COMPAT */
 
-/* -------------------------------------------------------------------------
- * Public API
- * ---------------------------------------------------------------------- */
 
 /**
  * ism_wifi_init()
