@@ -1,19 +1,3 @@
-/* mydacq_msg.h
- * Thread-safe messaging layer for myDACQ project.
- *
- * WHY THIS EXISTS:
- * consolemsg05.c's msgPost() and msgSend() were written for a single-threaded
- * polling loop. In FreeRTOS, multiple tasks call msgPost() concurrently, which
- * creates the critical region collision that HW07 identified. This layer wraps
- * the original functions with a FreeRTOS mutex so only one task can manipulate
- * the message list at a time.
- *
- * USAGE:
- *   1. Call mydacq_msg_init() once from MX_FREERTOS_Init() before any task runs.
- *   2. Tasks call mydacq_post() instead of msgPost() directly.
- *   3. The consoleTask calls mydacq_send() in its loop instead of msgSend().
- */
-
 #ifndef MYDACQ_MSG_H
 #define MYDACQ_MSG_H
 
@@ -21,6 +5,17 @@
 #include "semphr.h"
 #include <stddef.h>
 #include <stdint.h>
+#include "queue.h"
+
+#define MQTT_PAYLOAD_MAX  32
+
+typedef struct {
+    uint8_t  data[MQTT_PAYLOAD_MAX];
+    uint16_t len;
+} MqttMsg_type;
+
+extern QueueHandle_t g_mqttTxQueue;  /* deviceTask  -> mqttTask */
+extern QueueHandle_t g_mqttRxQueue;  /* mqttTask -> commandTask */
 
 /* -------------------------------------------------------------------------
  * Re-export the core types from consolemsg05.c so the rest of the project
@@ -62,10 +57,12 @@ typedef enum {
 /* -------------------------------------------------------------------------
  * The single shared console message list and its mutex.
  * Declared here, defined in mydacq_msg.c.
- * All tasks post to this one list; the consoleTask drains it.
  * ----------------------------------------------------------------------- */
 extern msgList_type  g_consoleList;   /* the shared UART transmit list      */
 extern SemaphoreHandle_t g_consoleMutex; /* mutex protecting g_consoleList  */
+extern SemaphoreHandle_t g_uartMutex;  /* shared UART access mutex */
+
+extern QueueHandle_t g_rxQueue;  /* single-byte UART RX queue */
 
 /* -------------------------------------------------------------------------
  * Public API
@@ -84,14 +81,6 @@ int mydacq_msg_init(void);
  * Thread-safe wrapper around msgPost().
  * Acquires the console mutex, calls msgPost(), releases the mutex.
  *
- * Parameters - identical to msgPost():
- *   pList   : the message list to post to (use &g_consoleList)
- *   pLink   : a FREE msgLink_type (next==NULL means free)
- *   bufp    : buffer where the formatted string will be stored
- *   bufsize : size of bufp in bytes
- *   fmt     : printf-style format string
- *   ...     : format arguments
- *
  * Returns CONSOLEMSG_returncodes value.
  * Returns LINK_IS_BUSY if the mutex cannot be acquired within 100ms.
  */
@@ -108,5 +97,8 @@ int mydacq_post(msgList_type *pList, msgLink_type *pLink,
  * Returns MSGSEND_RETURNCODES value.
  */
 int mydacq_send(msgList_type *pList);
+
+/* Called from UART RX ISR - feeds g_rxQueue */
+void mydacq_uart_rx_isr(uint8_t byte);
 
 #endif /* MYDACQ_MSG_H */
